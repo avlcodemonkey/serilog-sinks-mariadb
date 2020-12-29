@@ -5,7 +5,6 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
-using System.Threading;
 using Serilog.Debugging;
 using Serilog.Events;
 
@@ -13,10 +12,10 @@ namespace Serilog.Sinks.MariaDB.Sinks
 {
     internal sealed class MariaDBSinkCore
     {
-        private readonly string _tableName;
-        private readonly IFormatProvider _formatProvider;
-        private readonly MariaDBSinkOptions _options;
-        private readonly PeriodicCleanup _cleaner;
+        readonly string TableName;
+        readonly IFormatProvider FormatProvider;
+        readonly MariaDBSinkOptions Options;
+        readonly PeriodicCleanup Cleaner;
 
         public MariaDBSinkCore(
             string connectionString,
@@ -27,68 +26,62 @@ namespace Serilog.Sinks.MariaDB.Sinks
         )
         {
             if (string.IsNullOrWhiteSpace(connectionString))
-            {
                 throw new ArgumentNullException(nameof(connectionString));
-            }
-
             if (string.IsNullOrWhiteSpace(tableName))
-            {
                 throw new ArgumentNullException(nameof(tableName));
-            }
-            _tableName = tableName;
-            _formatProvider = formatProvider;
-            _options = options ?? throw new ArgumentNullException(nameof(options));
 
-            _options.PropertiesToColumnsMapping = _options.PropertiesToColumnsMapping
-                .Where(i => i.Value != null)
+            TableName = tableName;
+            FormatProvider = formatProvider;
+            Options = options ?? throw new ArgumentNullException(nameof(options));
+
+            Options.PropertiesToColumnsMapping = Options.PropertiesToColumnsMapping
+                .Where(i => !string.IsNullOrWhiteSpace(i.Value))
                 .ToDictionary(k => k.Key, v => v.Value);
 
             if (autoCreateTable)
             {
                 try
                 {
-                    var tableCreator = new SqlTableCreator(connectionString, _tableName, _options.PropertiesToColumnsMapping.Values);
-                    tableCreator.CreateTable();
+                    new SqlTableCreator(connectionString, TableName, Options.PropertiesToColumnsMapping.Values).CreateTable();
                 }
                 catch (Exception ex)
                 {
-                    SelfLog.WriteLine($"Exception creating table {_tableName}:\n{ex}");
+                    SelfLog.WriteLine($"Exception creating table {TableName}:\n{ex}");
                 }
             }
 
-            if (_options.LogRecordsExpiration.HasValue && _options.LogRecordsExpiration > TimeSpan.Zero && _options.LogRecordsCleanupFrequency > TimeSpan.Zero)
+            if (Options.LogRecordsExpiration.HasValue && Options.LogRecordsExpiration > TimeSpan.Zero && Options.LogRecordsCleanupFrequency > TimeSpan.Zero)
             {
-                _cleaner = new PeriodicCleanup(connectionString,
+                Cleaner = new PeriodicCleanup(connectionString,
                     tableName,
-                    _options.PropertiesToColumnsMapping["Timestamp"],
-                    _options.LogRecordsExpiration.Value,
-                    _options.LogRecordsCleanupFrequency,
-                    _options.TimestampInUtc,
-                    _options.DeleteChunkSize);
-                _cleaner.Start();
+                    Options.PropertiesToColumnsMapping["Timestamp"],
+                    Options.LogRecordsExpiration.Value,
+                    Options.LogRecordsCleanupFrequency,
+                    Options.TimestampInUtc,
+                    Options.DeleteChunkSize);
+                Cleaner.Start();
             }
         }
+
         public IEnumerable<KeyValuePair<string, object>> GetColumnsAndValues(LogEvent logEvent)
         {
-            foreach (var map in _options.PropertiesToColumnsMapping)
+            foreach (var map in Options.PropertiesToColumnsMapping)
             {
                 if (map.Key.Equals("Message", StringComparison.OrdinalIgnoreCase))
                 {
-                    yield return new KeyValuePair<string, object>(map.Value, logEvent.RenderMessage(_formatProvider));
+                    yield return new KeyValuePair<string, object>(map.Value, logEvent.RenderMessage(FormatProvider));
                     continue;
                 }
 
                 if (map.Key.Equals("MessageTemplate", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (_options.HashMessageTemplate)
+                    if (Options.HashMessageTemplate)
                     {
-                        using (var hasher = SHA256.Create())
-                        {
-                            var hash = hasher.ComputeHash(Encoding.Unicode.GetBytes(logEvent.MessageTemplate.Text));
+                        using var hasher = SHA256.Create();
+                        var hash = hasher.ComputeHash(Encoding.Unicode.GetBytes(logEvent.MessageTemplate.Text));
 
-                            yield return new KeyValuePair<string, object>(map.Value, Convert.ToBase64String(hash));
-                            continue;
-                        }
+                        yield return new KeyValuePair<string, object>(map.Value, Convert.ToBase64String(hash));
+                        continue;
                     }
 
                     yield return new KeyValuePair<string, object>(map.Value, logEvent.MessageTemplate.Text);
@@ -97,13 +90,13 @@ namespace Serilog.Sinks.MariaDB.Sinks
 
                 if (map.Key.Equals("Level", StringComparison.OrdinalIgnoreCase))
                 {
-                    yield return new KeyValuePair<string, object>(map.Value, _options.EnumsAsInts ? (object)logEvent.Level : logEvent.Level.ToString());
+                    yield return new KeyValuePair<string, object>(map.Value, Options.EnumsAsInts ? (object)logEvent.Level : logEvent.Level.ToString());
                     continue;
                 }
 
                 if (map.Key.Equals("Timestamp", StringComparison.OrdinalIgnoreCase))
                 {
-                    yield return new KeyValuePair<string, object>(map.Value, _options.TimestampInUtc ? logEvent.Timestamp.ToUniversalTime().DateTime : logEvent.Timestamp.DateTime);
+                    yield return new KeyValuePair<string, object>(map.Value, Options.TimestampInUtc ? logEvent.Timestamp.ToUniversalTime().DateTime : logEvent.Timestamp.DateTime);
                     continue;
                 }
 
@@ -116,14 +109,10 @@ namespace Serilog.Sinks.MariaDB.Sinks
                 if (map.Key.Equals("Properties", StringComparison.OrdinalIgnoreCase))
                 {
                     var properties = logEvent.Properties.AsEnumerable();
+                    if (Options.ExcludePropertiesWithDedicatedColumn)
+                        properties = properties.Where(i => !Options.PropertiesToColumnsMapping.ContainsKey(i.Key));
 
-                    if (_options.ExcludePropertiesWithDedicatedColumn)
-                    {
-                        properties = properties
-                            .Where(i => !_options.PropertiesToColumnsMapping.ContainsKey(i.Key));
-                    }
-
-                    yield return new KeyValuePair<string, object>(map.Value, _options.PropertiesFormatter(
+                    yield return new KeyValuePair<string, object>(map.Value, Options.PropertiesFormatter(
                         new ReadOnlyDictionary<string, LogEventPropertyValue>(
                             properties.ToDictionary(k => k.Key, v => v.Value)
                         )
@@ -143,7 +132,7 @@ namespace Serilog.Sinks.MariaDB.Sinks
                     var sb = new StringBuilder();
                     using (var writer = new StringWriter(sb))
                     {
-                        property.Render(writer, formatProvider: _formatProvider);
+                        property.Render(writer, formatProvider: FormatProvider);
                     }
 
                     yield return new KeyValuePair<string, object>(map.Value, sb.ToString());
@@ -158,7 +147,7 @@ namespace Serilog.Sinks.MariaDB.Sinks
 
                 var isEnum = scalarValue.Value is Enum;
 
-                if (isEnum && !_options.EnumsAsInts)
+                if (isEnum && !Options.EnumsAsInts)
                 {
                     yield return new KeyValuePair<string, object>(map.Value, scalarValue.Value.ToString());
                     continue;
@@ -172,14 +161,11 @@ namespace Serilog.Sinks.MariaDB.Sinks
         {
             var commandText = new StringBuilder();
             AppendInsertStatement(commandText);
-            int i = 0;
+            var i = 0;
             foreach (var value in columnValues)
             {
                 if (i != 0)
-                {
                     commandText.AppendLine(",");
-                }
-
                 AppendValuesPart(commandText, value, i);
                 i++;
             }
@@ -189,32 +175,24 @@ namespace Serilog.Sinks.MariaDB.Sinks
         public string GetInsertStatement(IEnumerable<KeyValuePair<string, object>> columnValues)
         {
             var commandText = new StringBuilder();
-
             AppendInsertStatement(commandText);
             AppendValuesPart(commandText, columnValues);
-
             return commandText.ToString();
         }
 
         public void AppendInsertStatement(StringBuilder output)
         {
-            var columnNames = _options.PropertiesToColumnsMapping
-                .Select(i => i.Value)
-                .ToList();
-
-            output.AppendLine($"INSERT INTO {_tableName} ({string.Join(", ", columnNames)})");
+            var columnNames = Options.PropertiesToColumnsMapping.Where(x => !string.IsNullOrEmpty(x.Value)).Select(i => i.Value).ToList();
+            output.AppendLine($"INSERT INTO {TableName} ({string.Join(", ", columnNames)})");
             output.AppendLine("VALUES");
         }
 
-        public void AppendValuesPart(StringBuilder output, IEnumerable<KeyValuePair<string, object>> columnValues, int? identifier = null)
+        public static void AppendValuesPart(StringBuilder output, IEnumerable<KeyValuePair<string, object>> columnValues, int? identifier = null)
         {
-            var parameters = columnValues
-                .Select(i => i.Value == null ? "DEFAULT" : $"@{i.Key}{(identifier.HasValue ? identifier.ToString() : "")}")
-                .ToList();
-
-            output.Append("(");
+            var parameters = columnValues.Where(x => !string.IsNullOrEmpty(x.Key)).Select(x => x.Value == null ? "DEFAULT" : $"@{x.Key}{(identifier.HasValue ? identifier.ToString() : "")}").ToList();
+            output.Append('(');
             output.Append(string.Join(", ", parameters));
-            output.Append(")");
+            output.Append(')');
         }
     }
 }

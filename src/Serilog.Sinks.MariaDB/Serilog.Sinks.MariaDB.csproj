@@ -12,6 +12,7 @@
     <RepositoryType>git</RepositoryType>
     <Company>TeleSoftas</Company>
     <OutputType>Library</OutputType>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
   </PropertyGroup>
 
   <ItemGroup>

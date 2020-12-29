@@ -6,55 +6,45 @@ namespace Serilog.Sinks.MariaDB
 {
     internal class SqlTableCreator
     {
-        private readonly string _connectionString;
-        private readonly string _tableName;
-        private readonly IReadOnlyCollection<string> _columns;
+        readonly string ConnectionString;
+        readonly string TableName;
+        readonly IReadOnlyCollection<string> Columns;
 
         public SqlTableCreator(string connectionString, string tableName, IReadOnlyCollection<string> columns)
         {
-            _connectionString = connectionString;
-            _tableName = tableName;
-            _columns = columns;
+            ConnectionString = connectionString;
+            TableName = tableName;
+            Columns = columns;
         }
 
         public int CreateTable()
         {
-            using (var conn = new MySqlConnection(_connectionString))
+            using (var conn = new MySqlConnection(ConnectionString))
             {
-                var sql = GetSqlForTable();
-                using (var cmd = new MySqlCommand(sql, conn))
+                using (var cmd = new MySqlCommand(GetSqlForTable(), conn))
                 {
                     conn.Open();
-
                     return cmd.ExecuteNonQuery();
                 }
             }
         }
 
-        private string GetSqlForTable()
+        string GetSqlForTable()
         {
             var sql = new StringBuilder();
             var i = 1;
 
-            sql.AppendLine($"CREATE TABLE IF NOT EXISTS `{_tableName}` ( ");
+            sql.AppendLine($"CREATE TABLE IF NOT EXISTS `{TableName}` ( ");
             sql.AppendLine("`Id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,");
-
-            foreach (var column in _columns)
+            foreach (var column in Columns)
             {
                 sql.Append($"`{column}` TEXT NULL");
-
-                if (_columns.Count > i++)
-                {
-                    sql.Append(",");
-                }
-
+                if (Columns.Count > i++)
+                    sql.Append(',');
                 sql.AppendLine();
             }
-
             sql.AppendLine(");");
-
             return sql.ToString();
         }
     }
-
 }

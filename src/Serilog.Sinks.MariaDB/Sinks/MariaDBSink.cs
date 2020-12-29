@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Threading;
 using System.Threading.Tasks;
 using MySqlConnector;
 using Serilog.Debugging;
@@ -15,9 +14,9 @@ namespace Serilog.Sinks.MariaDB.Sinks
         public const int DefaultBatchPostingLimit = 50;
         public static readonly TimeSpan DefaultPeriod = TimeSpan.FromSeconds(5);
 
-        private readonly string _connectionString;
-        private readonly MariaDBSinkCore _core;
-        private readonly bool _useBulkInsert;
+        readonly string ConnectionString;
+        readonly MariaDBSinkCore Core;
+        readonly bool UseBulkInsert;
 
         public MariaDBSink(string connectionString,
             IFormatProvider formatProvider,
@@ -29,30 +28,22 @@ namespace Serilog.Sinks.MariaDB.Sinks
             bool autoCreateTable,
             bool useBulkInsert) : base(batchPostingLimit, period, queueSizeLimit)
         {
-            _connectionString = connectionString;
-            _useBulkInsert = useBulkInsert;
-
-            _core = new MariaDBSinkCore(connectionString, formatProvider, options, tableName, autoCreateTable);
+            ConnectionString = connectionString;
+            UseBulkInsert = useBulkInsert;
+            Core = new MariaDBSinkCore(connectionString, formatProvider, options, tableName, autoCreateTable);
         }
 
         protected override async Task EmitBatchAsync(IEnumerable<LogEvent> events)
         {
             try
             {
-                using (var connection = new MySqlConnection(_connectionString))
-                {
-                    await connection.OpenAsync().ConfigureAwait(false);
+                using var connection = new MySqlConnection(ConnectionString);
+                await connection.OpenAsync().ConfigureAwait(false);
 
-                    if (_useBulkInsert)
-                    {
-                        await BulkInsert(events, connection).ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        await Insert(events, connection).ConfigureAwait(false);
-                    }
-                }
-                    
+                if (UseBulkInsert)
+                    await BulkInsert(events, connection).ConfigureAwait(false);
+                else
+                    await Insert(events, connection).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -60,50 +51,34 @@ namespace Serilog.Sinks.MariaDB.Sinks
             }
         }
 
-        private async Task BulkInsert(IEnumerable<LogEvent> events, MySqlConnection connection)
+        async Task BulkInsert(IEnumerable<LogEvent> events, MySqlConnection connection)
         {
-            var eventData = events.Select(i => _core.GetColumnsAndValues(i)).ToList();
-            var commandText = _core.GetBulkInsertStatement(eventData);
+            var eventData = events.Select(i => Core.GetColumnsAndValues(i)).ToList();
+            var commandText = Core.GetBulkInsertStatement(eventData);
 
             using (var cmd = new MySqlCommand(commandText, connection))
             {
-                int i = 0;
-                foreach (var columnValues in eventData)
-                {
-                    foreach (var columnValue in columnValues)
-                    {
-                        if (columnValue.Value != null)
-                        {
-                            cmd.Parameters.AddWithValue($"{columnValue.Key}{i}", columnValue.Value);
-                        }
-                    }
+                var i = 0;
+                eventData.ForEach(columnValues => {
+                    columnValues.Where(x => x.Value != null).ToList().ForEach(x => cmd.Parameters.AddWithValue($"{x.Key}{i}", x.Value));
                     i++;
-                }
+                });
                 await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
             }
         }
 
-        private async Task Insert(IEnumerable<LogEvent> events, MySqlConnection connection)
+        async Task Insert(IEnumerable<LogEvent> events, MySqlConnection connection)
         {
             foreach (var log in events)
             {
                 try
                 {
-                    var columnValues = _core.GetColumnsAndValues(log).ToList();
-                    var commandText = _core.GetInsertStatement(columnValues);
+                    var columnValues = Core.GetColumnsAndValues(log).ToList();
+                    var commandText = Core.GetInsertStatement(columnValues);
 
-                    using (var cmd = new MySqlCommand(commandText, connection))
-                    {
-                        foreach (var columnValue in columnValues)
-                        {
-                            if (columnValue.Value != null)
-                            {
-                                cmd.Parameters.AddWithValue(columnValue.Key, columnValue.Value);
-                            }
-                        }
-
-                        await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
-                    }
+                    using var cmd = new MySqlCommand(commandText, connection);
+                    columnValues.Where(x => x.Value != null).ToList().ForEach(x => cmd.Parameters.AddWithValue(x.Key, x.Value));
+                    await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {

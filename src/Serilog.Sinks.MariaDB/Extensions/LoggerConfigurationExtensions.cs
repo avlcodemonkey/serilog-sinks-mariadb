@@ -12,7 +12,7 @@ namespace Serilog.Sinks.MariaDB.Extensions
         /// </summary>
         /// <param name="loggerConfiguration">Options for the sink</param>
         /// <param name="batchPostingLimit">The maximum number of events to include in a single batch</param>
-        /// <param name="queueSizeLimit">The maximum number of events that will be held in-memory while waiting to store them to SQL. Beyond this limit, events will be dropped. Default is 10000</param>   
+        /// <param name="queueSizeLimit">The maximum number of events that will be held in-memory while waiting to store them to SQL. Beyond this limit, events will be dropped. Default is 10000</param>
         /// <param name="period">The time to wait between checking for event batches</param>
         /// <param name="options">Additional options for the sink</param>
         /// <param name="tableName">Name of the database table used for storing events</param>
@@ -34,9 +34,7 @@ namespace Serilog.Sinks.MariaDB.Extensions
             )
         {
             if (loggerConfiguration == null)
-            {
                 throw new ArgumentNullException(nameof(loggerConfiguration));
-            }
 
             return loggerConfiguration.Sink(
                 new MariaDBSink(
@@ -73,9 +71,7 @@ namespace Serilog.Sinks.MariaDB.Extensions
             )
         {
             if (loggerAuditConfiguration == null)
-            {
                 throw new ArgumentNullException(nameof(loggerAuditConfiguration));
-            }
 
             return loggerAuditConfiguration.Sink(
                 new MariaDBAuditSink(
