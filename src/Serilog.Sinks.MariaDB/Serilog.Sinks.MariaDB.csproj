@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>netstandard1.6</TargetFramework>
+    <TargetFramework>netstandard2.1</TargetFramework>
     <VersionPrefix>1.0.0</VersionPrefix>
     <PackageTags>serilog sinks sink mysql mariadb</PackageTags>
     <RepositoryUrl>https://github.com/TeleSoftas/serilog-sinks-mariadb</RepositoryUrl>
@@ -11,6 +11,7 @@
     <Description>A Serilog sink that writes events to MariaDB and MySQL. Supports audit, batching and custom columns</Description>
     <RepositoryType>git</RepositoryType>
     <Company>TeleSoftas</Company>
+    <OutputType>Library</OutputType>
   </PropertyGroup>
 
   <ItemGroup>
